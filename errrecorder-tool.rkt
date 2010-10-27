@@ -170,9 +170,7 @@
           (let ([note (new errrecorder-note%)]
                 [exn-type (extract-exn-type exn)])
             (send note set-callback 
-                  (λ () (post-pure-port 
-                         (string->url "http://li21-127.members.linode.com:8020/errrecorder") 
-                         (bindings->post-bytes `((type ,(extract-exn-type exn)))))))
+                  (λ () (send-url (format "http://li21-127.members.linode.com:8020/errrecorder?type=~a" (extract-exn-type exn)))))
             (write-special note (current-error-port))
             (display #\space (current-error-port))))))
     
