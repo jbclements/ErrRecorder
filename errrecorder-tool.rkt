@@ -151,15 +151,17 @@
       (cond [(char=? (first loc) #\space) empty]
             [else (cons (first loc) (trim-exn (rest loc)))]))
     
-    ; error-box-wrapper : function? -> nothing
-    ; message-box error wrapper
-    (define (error-box-wrapper func)
+    ; log-error-wrapper : (-> 'b) -> 'b
+    ; evaluate the given function, spool the error message
+    ; to the error log on a network failure
+    (define (log-error-wrapper func)
       (with-handlers 
           ([exn:fail:network? 
-            (λ (exn) 
-              (message-box "ErrRecorder" 
-                           (format "unable to connect to ErrRecorder server: ~a" 
-                                   (exn-message exn))))])
+            (λ (exn)
+              (log-error 
+               (format 
+                "unable to connect to ErrRecorder server: ~a" 
+                (exn-message exn))))])
         (func)))
     
     ; display-errrecorder-button : exn? string? -> nothing
@@ -179,7 +181,7 @@
     ; send-error-request : exn? string? -> nothing
     ; sends error information to server
     (define (send-error-request exn msg)
-      (error-box-wrapper
+      (log-error-wrapper
        (λ () (post-pure-port 
               (string->url "http://li21-127.members.linode.com:8021/errrecorder") 
               (bindings->post-bytes `((type ,(extract-exn-type exn)) 
