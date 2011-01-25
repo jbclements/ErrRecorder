@@ -6,7 +6,8 @@
          net/uri-codec
          racket/date
          racket/gui
-         mrlib/include-bitmap)
+         mrlib/include-bitmap
+         rackunit)
 
 (provide tool@)
 
@@ -15,14 +16,15 @@
 (define db-submit-port 8022)
 (define db-query-port 8021)
 
-(define servlet-path (list (path/param "errrecorder" '())))
+(define submit-servlet-path (list (path/param "ers-submit" '())))
+(define query-servlet-path (list (path/param "errrecorder" '())))
 
 (define submit-url 
- (url "http" #f db-host db-submit-port #t servlet-path `() #f))
+ (url "http" #f db-host db-submit-port #t submit-servlet-path `() #f))
 
 (define (query-error-url type-str msg-str)
   (url->string
-   (url "http" #f db-host db-query-port #t servlet-path
+   (url "http" #f db-host db-query-port #t query-servlet-path
         `((type . ,type-str)
           (msg . ,msg-str))
         #f)))
@@ -128,47 +130,6 @@
       (make-note% "syncheck.png"        
                   (include-bitmap (lib "icons/syncheck.png") 'png/mask)))
     
-    ; string->post-bytes : string? -> bytes?
-    ; converts string into url-encoded bytes
-    (define (string->post-bytes s)
-      (string->bytes/utf-8
-       (form-urlencoded-encode s)))
-    
-    ; symbol->post-bytes : symbol? -> bytes?
-    ; converts symbol into url-encoded bytes
-    (define symbol->post-bytes
-      (compose string->post-bytes symbol->string))
-    
-    ; bindings->post-bytes : (list (symbol? string?)) -> bytes?
-    ; converts a list of symbol to string bindings into url-encoded bytes
-    (define bindings->post-bytes
-      (match-lambda
-        [(list) #""]
-        [(list (list (? symbol? sym) (? string? val)))
-         (bytes-append (symbol->post-bytes sym) #"=" (string->post-bytes val))]
-        [(list-rest (list (? symbol? sym) (? string? val)) bs)
-         (bytes-append (symbol->post-bytes sym) #"=" (string->post-bytes val)
-                       #"&" (bindings->post-bytes bs))]))
-    
-    ; extract-exn-type : exn? -> string?
-    ; extracts the exn type out of the exn message
-    (define (extract-exn-type exn)
-      (let* ([exn-str (format "~v" exn)]
-             [exn-lst (string->list exn-str)])
-        (list->string (trim-exn (string->list (substring exn-str (find-start-exn exn-lst 0)))))))
-    
-    ; find-start-exn : list? int? -> list?
-    ; finds the start of the exn message so you only get the exn type
-    (define (find-start-exn loc cnt)
-      (cond [(and (char=? (first loc) #\e) (char=? (second loc) #\x) (char=? (third loc) #\n)) cnt]
-            [else (find-start-exn (rest loc) (+ cnt 1))]))
-    
-    ; trim-exn : list? -> list?
-    ; trims the end of the exn message so you only get the exn type
-    (define (trim-exn loc)
-      (cond [(char=? (first loc) #\space) empty]
-            [else (cons (first loc) (trim-exn (rest loc)))]))
-    
     ; log-error-wrapper : (-> 'b) -> 'b
     ; evaluate the given function, spool the error message
     ; to the error log on a network failure
@@ -247,3 +208,51 @@
     (define (phase2) (void))
     
     ))
+
+
+
+; string->post-bytes : string? -> bytes?
+; converts string into url-encoded bytes
+(define (string->post-bytes s)
+  (string->bytes/utf-8
+   (form-urlencoded-encode s)))
+
+; symbol->post-bytes : symbol? -> bytes?
+; converts symbol into url-encoded bytes
+(define symbol->post-bytes
+  (compose string->post-bytes symbol->string))
+
+; bindings->post-bytes : (list (symbol? string?)) -> bytes?
+; converts a list of symbol to string bindings into url-encoded bytes
+(define (bindings->post-bytes bindings)
+  (apply 
+   bytes-append
+   (add-between
+    (for/list ([pr (in-list bindings)])
+      (bytes-append (symbol->post-bytes (first pr)) #"="
+                    (string->post-bytes (second pr))))
+    #"&")))
+
+(check-equal? 
+ (bindings->post-bytes `((abc "rhumba") (def "zumpa zumpa\tzumpa")))
+ #"abc=rhumba&def=zumpa+zumpa%09zumpa")
+
+; extract-exn-type : exn? -> string?
+; extracts the exn type out of the exn message
+(define (extract-exn-type exn)
+  (let* ([exn-str (format "~v" exn)]
+         [exn-lst (string->list exn-str)])
+    (list->string (trim-exn (string->list (substring exn-str (find-start-exn exn-lst 0)))))))
+
+; find-start-exn : list? int? -> list?
+; finds the start of the exn message so you only get the exn type
+(define (find-start-exn loc cnt)
+  (cond [(and (char=? (first loc) #\e) (char=? (second loc) #\x) (char=? (third loc) #\n)) cnt]
+        [else (find-start-exn (rest loc) (+ cnt 1))]))
+
+
+; trim-exn : list? -> list?
+; trims the end of the exn message so you only get the exn type
+(define (trim-exn loc)
+  (cond [(char=? (first loc) #\space) empty]
+        [else (cons (first loc) (trim-exn (rest loc)))]))
