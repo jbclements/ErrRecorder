@@ -10,6 +10,24 @@
 
 (provide tool@)
 
+
+(define db-host "li21-127.members.linode.com")
+(define db-submit-port 8022)
+(define db-query-port 8021)
+
+(define servlet-path (list (path/param "errrecorder" '())))
+
+(define submit-url 
+ (url "http" #f db-host db-submit-port #t servlet-path `() #f))
+
+(define (query-error-url type-str msg-str)
+  (url->string
+   (url "http" #f db-host db-query-port #t servlet-path
+        `((type . ,type-str)
+          (msg . ,msg-str))
+        #f)))
+
+
 (define tool@
   (unit
     (import drracket:tool^)
@@ -172,9 +190,9 @@
           (let ([note (new errrecorder-note%)]
                 [exn-type (extract-exn-type exn)])
             (send note set-callback 
-                  (λ () (send-url (format "http://li21-127.members.linode.com:8021/errrecorder?type=~a&msg=~a" 
-                                          (form-urlencoded-encode (extract-exn-type exn))
-                                          (form-urlencoded-encode msg)))))
+                  (λ () (send-url 
+                         (query-error-url (extract-exn-type exn)
+                                          msg))))
             (write-special note (current-error-port))
             (display #\space (current-error-port))))))
     
@@ -182,11 +200,16 @@
     ; sends error information to server
     (define (send-error-request exn msg)
       (log-error-wrapper
-       (λ () (post-pure-port 
-              (string->url "http://li21-127.members.linode.com:8021/errrecorder") 
-              (bindings->post-bytes `((type ,(extract-exn-type exn)) 
-                                      (time ,(number->string (current-seconds)))
-                                      (msg ,msg)))))))
+       (λ () 
+         (define in-port
+           (post-pure-port
+            submit-url 
+            (bindings->post-bytes 
+             `((type ,(extract-exn-type exn)) 
+               (time ,(number->string (current-seconds)))
+               (msg ,msg)))))
+          ;; ignore the result:
+          (close-input-port in-port))))
     
     ; errrecorder-language<%> : an empty interface
     (define errrecorder-language<%>
