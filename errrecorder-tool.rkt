@@ -130,19 +130,6 @@
       (make-note% "syncheck.png"        
                   (include-bitmap (lib "icons/syncheck.png") 'png/mask)))
     
-    ; log-error-wrapper : (-> 'b) -> 'b
-    ; evaluate the given function, spool the error message
-    ; to the error log on a network failure
-    (define (log-error-wrapper func)
-      (with-handlers 
-          ([exn:fail:network? 
-            (λ (exn)
-              (log-error 
-               (format 
-                "unable to connect to ErrRecorder server: ~a" 
-                (exn-message exn))))])
-        (func)))
-    
     ; display-errrecorder-button : exn? string? -> nothing
     ; adds button to gui
     (define (display-errrecorder-button exn msg)
@@ -157,20 +144,6 @@
             (write-special note (current-error-port))
             (display #\space (current-error-port))))))
     
-    ; send-error-request : exn? string? -> nothing
-    ; sends error information to server
-    (define (send-error-request exn msg)
-      (log-error-wrapper
-       (λ () 
-         (define in-port
-           (post-pure-port
-            submit-url 
-            (bindings->post-bytes 
-             `((type ,(extract-exn-type exn)) 
-               (time ,(number->string (current-seconds)))
-               (msg ,msg)))))
-          ;; ignore the result:
-          (close-input-port in-port))))
     
     ; errrecorder-language<%> : an empty interface
     (define errrecorder-language<%>
@@ -192,7 +165,8 @@
     
     ; make-errrecorder-error-display-handler : string? exn? -> nothing
     ; adds errrecorder button to gui before normal display handler is called
-    (define ((make-errrecorder-error-display-handler current-error-display-handler) msg exn)
+    (define ((make-errrecorder-error-display-handler
+              current-error-display-handler) msg exn)
       (send-error-request exn msg)
       (display-errrecorder-button exn msg)
       (current-error-display-handler msg exn))
@@ -209,6 +183,37 @@
     
     ))
 
+
+
+; send-error-request : exn? string? -> nothing
+; sends error information to server
+(define (send-error-request exn msg)
+  (log-error-wrapper
+   (λ () 
+     (define in-port
+       (post-pure-port
+        submit-url 
+        (bindings->post-bytes 
+         `((type ,(extract-exn-type exn)) 
+           (time ,(number->string (current-seconds)))
+           (msg ,msg)))))
+     ;; ignore the result:
+     (close-input-port in-port))))
+
+
+
+; log-error-wrapper : (-> 'b) -> 'b
+; evaluate the given function, spool the error message
+; to the error log on a network failure
+(define (log-error-wrapper func)
+  (with-handlers 
+      ([exn:fail:network? 
+        (λ (exn)
+          (log-error 
+           (format 
+            "unable to connect to ErrRecorder server: ~a" 
+            (exn-message exn))))])
+    (func)))
 
 
 ; string->post-bytes : string? -> bytes?
@@ -240,19 +245,21 @@
 ; extract-exn-type : exn? -> string?
 ; extracts the exn type out of the exn message
 (define (extract-exn-type exn)
-  (let* ([exn-str (format "~v" exn)]
-         [exn-lst (string->list exn-str)])
-    (list->string (trim-exn (string->list (substring exn-str (find-start-exn exn-lst 0)))))))
+  (cond [(exn? exn)
+         (let-values ([(struct-type skipped?) (struct-info exn)])
+           (match struct-type
+             [#f "no exn type found"]
+             [struct-type
+              (let-values ([(type dc2 dc3 dc4 dc5 dc6 dc7 dc8) 
+                            (struct-type-info struct-type)])
+                (symbol->string type))]))]
+        [else "not-an-exception"]))
 
-; find-start-exn : list? int? -> list?
-; finds the start of the exn message so you only get the exn type
-(define (find-start-exn loc cnt)
-  (cond [(and (char=? (first loc) #\e) (char=? (second loc) #\x) (char=? (third loc) #\n)) cnt]
-        [else (find-start-exn (rest loc) (+ cnt 1))]))
-
-
-; trim-exn : list? -> list?
-; trims the end of the exn message so you only get the exn type
-(define (trim-exn loc)
-  (cond [(char=? (first loc) #\space) empty]
-        [else (cons (first loc) (trim-exn (rest loc)))]))
+(check-equal? (extract-exn-type (exn:fail "frooty" 
+                                          (current-continuation-marks)))
+              "exn:fail")
+(check-equal? (extract-exn-type 
+               (exn:fail:contract:divide-by-zero
+                "frooty" 
+                (current-continuation-marks)))
+              "exn:fail:contract:divide-by-zero")
