@@ -16,6 +16,9 @@
 (define db-submit-port 8022)
 (define db-query-port 8021)
 
+;; ignore all but the first 'max-err-len' chars of the error message
+(define max-err-len 200)
+
 (define submit-servlet-path (list (path/param "ers-submit" '())))
 (define query-servlet-path (list (path/param "errrecorder" '())))
 
@@ -130,17 +133,15 @@
       (make-note% "syncheck.png"        
                   (include-bitmap (lib "icons/syncheck.png") 'png/mask)))
     
-    ; display-errrecorder-button : exn? string? -> nothing
+    ; display-errrecorder-button : string? string? -> nothing
     ; adds button to gui
-    (define (display-errrecorder-button exn msg)
+    (define (display-errrecorder-button exn-type msg)
       (when errrecorder-note%
         (when (port-writes-special? (current-error-port))
-          (let ([note (new errrecorder-note%)]
-                [exn-type (extract-exn-type exn)])
+          (let ([note (new errrecorder-note%)])
             (send note set-callback 
                   (λ () (send-url 
-                         (query-error-url (extract-exn-type exn)
-                                          msg))))
+                         (query-error-url exn-type msg))))
             (write-special note (current-error-port))
             (display #\space (current-error-port))))))
     
@@ -167,8 +168,17 @@
     ; adds errrecorder button to gui before normal display handler is called
     (define ((make-errrecorder-error-display-handler
               current-error-display-handler) msg exn)
-      (send-error-request exn msg)
-      (display-errrecorder-button exn msg)
+      
+      (define msg-with-syntax-info (maybe-add-syntax-err-info msg exn))
+      (define trimmed-msg 
+        (substring 
+         msg-with-syntax-info
+         0
+         (min max-err-len (string-length msg-with-syntax-info))))
+      (define exn-type (extract-exn-type exn))
+      
+      (send-error-request exn-type trimmed-msg)
+      (display-errrecorder-button exn-type trimmed-msg)
       (current-error-display-handler msg exn))
     
     ; phase1 : nothing -> nothing
@@ -185,22 +195,20 @@
 
 
 
-; send-error-request : exn? string? -> nothing
+; send-error-request : string? string? -> nothing
 ; sends error information to server
-(define (send-error-request exn msg)
+(define (send-error-request exn-type msg)
   (log-error-wrapper
    (λ () 
      (define in-port
        (post-pure-port
         submit-url 
         (bindings->post-bytes 
-         `((type ,(extract-exn-type exn)) 
+         `((type ,exn-type) 
            (time ,(number->string (current-seconds)))
            (msg ,msg)))))
      ;; ignore the result:
      (close-input-port in-port))))
-
-
 
 ; log-error-wrapper : (-> 'b) -> 'b
 ; evaluate the given function, spool the error message
@@ -215,6 +223,21 @@
             (exn-message exn))))])
     (func)))
 
+;; maybe-add-syntax-err-info : string exn -> string
+;; for syntax errors, the text of the source code becomes 
+;; a part of the error message.  Extract and add it to 
+;; the message for syntax errors.
+(define (maybe-add-syntax-err-info msg exn)
+  (cond [(exn:fail:syntax? exn)
+         (define sources (for/list ([expr (in-list (exn:fail:syntax-exprs exn))])
+                           (format "~a" (syntax->datum expr))))
+         (match sources
+           [(list) msg]
+           [(list a) (string-append msg " in: " a)]
+           [longer-list (string-append msg " in: "
+                                       (apply string-append
+                                              (add-between sources "\n")))])]
+        [else msg]))
 
 ; string->post-bytes : string? -> bytes?
 ; converts string into url-encoded bytes
@@ -254,6 +277,7 @@
                             (struct-type-info struct-type)])
                 (symbol->string type))]))]
         [else "not-an-exception"]))
+
 
 (check-equal? (extract-exn-type (exn:fail "frooty" 
                                           (current-continuation-marks)))
