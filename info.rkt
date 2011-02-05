@@ -21,7 +21,7 @@
 
 ;; planet-specific:
 (define repositories '("4.x"))
-;(define primary-file "main.rkt")
+(define primary-file "main.rkt")
 
 (define homepage "http://www.errrecorder.org/")
 #;(define url "http://schematics.sourceforge.net/")
